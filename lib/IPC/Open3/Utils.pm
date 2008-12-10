@@ -3,9 +3,10 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = 0.1;
+$IPC::Open3::Utils::VERSION = 0.2;
 require Exporter;
-@IPC::Open3::Utils::ISA = qw(Exporter);
+@IPC::Open3::Utils::EXPORT    = qw(run_cmd put_cmd_in);
+@IPC::Open3::Utils::ISA       = qw(Exporter);
 @IPC::Open3::Utils::EXPORT_OK = qw(
     run_cmd                 put_cmd_in              
     child_error_ok          child_error_failed_to_execute 
@@ -306,7 +307,7 @@ IPC::Open3::Utils - Functions for facilitating some of the most common open3() u
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.1
+This document describes IPC::Open3::Utils version 0.2
 
 =head1 DESCRIPTION
 
@@ -316,15 +317,17 @@ The goals of this module are:
 
 =item 1 Encapsulate logic done every time you want to use open3().
 
-=item 2 Out of the box printing to STDOUT/STDERR or assignments to variables (see #5)
+=item 2 boolean check of command execution
 
-=item 3 Provide access to $? and $! like you have with system()
+=item 3 Out of the box printing to STDOUT/STDERR or assignments to variables (see #6)
 
-=item 4 open3() error reporting
+=item 4 Provide access to $? and $! like you have with system()
 
-=item 5 comprehensive but simple output processing handlers for flexibility (see #2)
+=item 5 open3() error reporting
 
-=item 6 Lightweigt utilities for examamining the menaing of $? without POSIX
+=item 6 comprehensive but simple output processing handlers for flexibility (see #3)
+
+=item 7 Lightweight utilities for examining the meaning of $? without POSIX
 
 =back
 
@@ -407,6 +410,16 @@ You can look for a certain piece of data then stop processing once you have it:
    } 
    
 You can do any or all of it!
+
+=head1 EXPORT
+
+All functions can be exported.
+
+run_cmd() and put_cmd_in() are exported by default and via ':cmd'
+
+:all will export, well, all functions
+
+:err will export all child_error* functions.
 
 =head1 INTERFACE 
 
