@@ -12,6 +12,7 @@ diag( "Testing IPC::Open3::Utils $IPC::Open3::Utils::VERSION" );
 
 my $script = 'ipc_opens_utils_testing.perl';
 if (open my $fh, '>', $script) {
+    # $^X
     print {$fh} <<'END_SCRIPT';
 #!/usr/bin/perl
 
@@ -46,12 +47,30 @@ END_SCRIPT
     chmod 0755, $script;
 }
 
-my @cmd = ('perl',$script);
+my @cmd = ($^X,$script);
 my @one = ("expected stdout\n", "expected stderr\n");
 
 SKIP: {
-    skip "Could not create executable script for testing: $!", 89 if !-x $script;
+    skip "Could not create executable script for testing: $!", 88 if !-x $script;
+    skip "\n\$^X is not set!\n", 88 if !$^X;
+    skip 'Insufficient permissions to test create_ipc_open3_utils_wrap_script()', 88 if !create_ipc_open3_utils_wrap_script();
+    
+    ok(-x '/usr/bin/ipc_open3_utils_wrap', 'create wrap script no args'); 
+    # 0755
 
+    create_ipc_open3_utils_wrap_script('./test.1');
+    ok(-x './test.1', 'create wrap script file arg');
+
+    create_ipc_open3_utils_wrap_script('./test.2', 0644);
+    ok(-e './test.2' && !-x './test.2', 'create wrap script file && mode (oct) args');
+
+    create_ipc_open3_utils_wrap_script('./test.3', "0644");
+    ok(-e './test.3' && !-x './test.3', 'create wrap script file && mode (string) args');   
+ 
+    # no need to risk breaking system wide util by goofing the mode:
+    #    create_ipc_open3_utils_wrap_script(undef, $mode)
+
+    
     SKIP: {
    
         # To verify that the default handler goes where it should, manually run these commands in t/:
@@ -64,13 +83,13 @@ SKIP: {
         #    untie attempted while 2 inner references still exist at /System/Library/Perl/5.8.8/IPC/Open3.pm line 204.
     
         skip 'Test::Output && Test::Trap are both broken', 4;
-        eval 'require Test::Output'; # see Test::Output, Test::Trap
-        skip "Test::Output is needed for these tests", 4 if $@;
+        # eval 'require Test::Output'; # see Test::Output, Test::Trap
+        # skip "Test::Output is needed for these tests", 4 if $@;
     
         # use Test::Trap;
         # trap {
         my $run_test_script = sub {
-            IPC::Open3::Utils::run_cmd('perl', $script, 1);
+            IPC::Open3::Utils::run_cmd($^X, $script, 1);
         };
         # is ( $trap->stdout, "expected stdout\n", "STDOUT" );
         # is ( $trap->stderr, "expected stderrn", "STDERR" );
@@ -79,7 +98,7 @@ SKIP: {
         Test::Output::combined_is($run_test_script, join('', @one), 'STDOUT/STDERRORDER');
 
         $run_test_script = sub {
-            IPC::Open3::Utils::run_cmd('perl', $script, 1, { 
+            IPC::Open3::Utils::run_cmd($^X, $script, 1, { 
                 'handler' => sub {
                     my ($cur_line, $stdin, $is_stderr, $is_open3_err, $short_circuit_loop_sr) = @_;
                     if ($is_stderr) {
@@ -96,24 +115,6 @@ SKIP: {
     
         Test::Output::output_is($run_test_script, "LINE: expected stdout\n", "LINE: expected stderr\n", 'STDOUT w/ hashref modifier');
         Test::Output::combined_is($run_test_script, "LINE: expected stdout\nLINE: expected stderr\n", 'ORDERING w/ hashref modifier');
-    };
-
-    SKIP: {
-        skip 'Insufficient permissions to test create_ipc_open3_utils_wrap_script()', 4 if !create_ipc_open3_utils_wrap_script();
-        ok(-x '/usr/bin/ipc_open3_utils_wrap', 'create wrap script no args'); 
-        # 0755
-    
-        create_ipc_open3_utils_wrap_script('./test.1');
-        ok(-x './test.1', 'create wrap script file arg');
-    
-        create_ipc_open3_utils_wrap_script('./test.2', 0644);
-        ok(-e './test.2' && !-x './test.2', 'create wrap script file && mode (oct) args');
-
-        create_ipc_open3_utils_wrap_script('./test.3', "0644");
-        ok(-e './test.3' && !-x './test.3', 'create wrap script file && mode (string) args');   
-     
-        # no need to risk breaking system wide util by goofing the mode:
-        #    create_ipc_open3_utils_wrap_script(undef, $mode)
     };
 
     my %args;
@@ -260,7 +261,7 @@ SKIP: {
             });
             ok(!$handler, 'no false line == no child_error_uniq_mismatch call');
             ok($rc, 'no false line == no child_error_uniq_mismatch call ==  RC is still true');
-        }
+        };
     
         {
             my %args;
@@ -302,11 +303,20 @@ SKIP: {
     my @stdout;
     my $stderr;
     my $stdout;
+    
     put_cmd_in(@cmd, \@all_output);
-    is_deeply(\@all_output, \@one, 'one output arg array ref');
-
+    # order not necessarily kept due to to IO::Select behavior
+    my $all_str = join('',@all_output);
+    ok($all_str eq join('',@one) || $all_str eq  join('',reverse @one),'one output arg array ref');
+    ## Test::Deep::any, bag, set, etc would work as well
+    ## is_deeply(\@all_output, \@one, 'one output arg array ref');
+    ## or
+    ## is_deeply(\@all_output, [reverse @one], 'one output arg array ref');
+    
     put_cmd_in(@cmd, \$all_output);
-    ok($all_output eq join('',@one), 'one output arg scalar ref');
+    # order not necessarily kept due to to IO::Select behavior
+    ok($all_output eq join('',@one) || $all_output eq join('',reverse @one), 'one output arg scalar ref');
+
 
     put_cmd_in(@cmd, \@stdout, \@stderr);
     is_deeply(\@stdout, [$one[0]], 'two output arg array ref - stdout');

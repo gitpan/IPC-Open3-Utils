@@ -1,5 +1,12 @@
 Revision history for IPC-Open3-Utils
 
+0.3  Thu Dec 11 19:27:53 CST 2008
+    - 00.load.t - just skip all when unprivileged to avoid mis calculation/run of tests
+    - 00.load.t - try and account for IO::Select behavior and single output ref results in tests
+    - 00.load.t - invoke perl in tests as $^X to address 'Can't locate Devel/Autoflush.pm in @INC' and friends
+    - 00.load.t - comment out unnecessary (for now) eval/skip just to be on the safe side
+    - 00.load.t - add ';' to end of a SKIP block w/out one just to be on the safe side
+    
 0.2  Tue Dec  9 22:49:42 2008
     - EXPORT info to POD
     - run_cmd() and put_cmd_in() exported by default

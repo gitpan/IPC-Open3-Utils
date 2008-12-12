@@ -3,7 +3,7 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = 0.2;
+$IPC::Open3::Utils::VERSION = 0.3;
 require Exporter;
 @IPC::Open3::Utils::EXPORT    = qw(run_cmd put_cmd_in);
 @IPC::Open3::Utils::ISA       = qw(Exporter);
@@ -307,7 +307,7 @@ IPC::Open3::Utils - Functions for facilitating some of the most common open3() u
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.2
+This document describes IPC::Open3::Utils version 0.3
 
 =head1 DESCRIPTION
 
