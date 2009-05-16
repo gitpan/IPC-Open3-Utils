@@ -12,9 +12,10 @@ diag( "Testing IPC::Open3::Utils $IPC::Open3::Utils::VERSION" );
 
 my $script = 'ipc_opens_utils_testing.perl';
 if (open my $fh, '>', $script) {
-    # $^X
+    print "#!$^X\n";
     print {$fh} <<'END_SCRIPT';
-#!/usr/bin/perl
+    
+require Time::HiRes;
 
 my ($n,$e,$p,$rc) = @ARGV;
 $n = abs(int($n)) || 1;
@@ -35,7 +36,7 @@ if($rc) {
 
 for (1 .. $n) {
     print "expected stdout\n";
-
+    Time::HiRes::nanosleep(10_000); # handle oddity in timing in tests on some systems
     print STDERR "expected stderr\n"
 }
 
@@ -246,6 +247,7 @@ SKIP: {
             });
             ok($zero, 'child_error_wrapper_used SCALAR ref used');
             ok($zero =~ m/test\.1/, 'correct child_error_wrapper used');
+            # why fail?
             ok($out eq $one[0] && $err eq $one[1], 'child_error_uniq_mismatch false does not short circuit');
             ok($rc, 'child_error_uniq_mismatch false does not short circuit RC is still true');
         

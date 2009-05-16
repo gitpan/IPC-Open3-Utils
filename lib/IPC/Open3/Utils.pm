@@ -3,7 +3,7 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = 0.3;
+$IPC::Open3::Utils::VERSION = 0.4;
 require Exporter;
 @IPC::Open3::Utils::EXPORT    = qw(run_cmd put_cmd_in);
 @IPC::Open3::Utils::ISA       = qw(Exporter);
@@ -184,11 +184,12 @@ sub run_cmd {
         }
     }
 
-    waitpid $child_pid, 0;
     $stdout->close;
     $stderr->close;
     $stdin->close if defined $stdin && ref $stdin eq 'IO::Handle'; #  && !$arg_hr->{'close_stdin'};
     
+    waitpid $child_pid, 0;
+
     if (defined $caught_child || defined $caught_oserr) {
         $? = $caught_child;
         $! = $caught_oserr;
@@ -210,7 +211,7 @@ sub put_cmd_in {
     # my $err = pop(@cmd);
     
     my $err = !defined $cmd[-1] || ref $cmd[-1] ? pop(@cmd) : undef;
-    my $out = !defined $cmd[-1] || ref $cmd[-1] ? pop @cmd : $err;
+    my $out = !defined $cmd[-1] || ref $cmd[-1] ? pop(@cmd) : $err;
 
     $arg_hr->{'handler'} = sub {
         my ($cur_line, $stdin, $is_stderr, $is_open3_err, $short_circuit_loop_sr) = @_;
@@ -307,7 +308,7 @@ IPC::Open3::Utils - Functions for facilitating some of the most common open3() u
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.3
+This document describes IPC::Open3::Utils version 0.4
 
 =head1 DESCRIPTION
 
@@ -321,7 +322,7 @@ The goals of this module are:
 
 =item 3 Out of the box printing to STDOUT/STDERR or assignments to variables (see #6)
 
-=item 4 Provide access to $? and $! like you have with system()
+=item 4 Provide access to $? and $! like you have with system() (See L</TODO> for a note about this)
 
 =item 5 open3() error reporting
 
@@ -336,9 +337,9 @@ The goals of this module are:
     use IPC::Open3::Utils qw(run_cmd put_cmd_in ...);
 
     
-    run_cmd(@cmd); # like 'system(@cmd)' but w/ out $?
+    run_cmd(@cmd); # like 'system(@cmd)'
     
-    # like 'if (system(@cmd) != 0)' but w/ out $?
+    # like 'if (system(@cmd) != 0)'
     if (!run_cmd(@cmd)) {
         print "Oops you may need to re-run that command, it failed.\n1";   
     }
@@ -612,6 +613,8 @@ A SCALAR reference used to store the name of the script that ended up being used
 
 =head2 Getting the Child Error Code (IE $?) from an open3() call
 
+See L</TODO> for a note about this
+
 This functionality is acheived by wrapping the command by a script that calls system() then outputs a specially formatted line indicating the values we are interested in.
 
 If anyone has a better way to do this I'd be very ineterested!
@@ -689,6 +692,16 @@ No bugs have been reported.
 Please report any bugs or feature requests to
 C<bug-ipc-open3-utils@rt.cpan.org>, or through the web interface at
 L<http://rt.cpan.org>.
+
+=head1 TODO
+
+ - clarify when wrapper is needed (e.g. SIGCHLD = ignore), improve/simplify/document non-wrapped erro value logic
+ 
+ - abort loop, blocks ? (close before waitpid ?  autoflush() by default ? if not closed && !autoflushed() finish read ?)
+ 
+ - 'blocking' $io->blocking($v)
+
+ - add filehandle support to put_cmd_in()
 
 =head1 AUTHOR
 

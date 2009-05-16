@@ -1,5 +1,10 @@
 Revision history for IPC-Open3-Utils
 
+0.4  Sat May 16 14:21:57 2009
+    - tests, use $^X instead of hardcoded path, hack to fix timing issue on certain systems
+    - waitpid() call to after close()
+    - Added TODO list
+
 0.3  Thu Dec 11 19:27:53 CST 2008
     - 00.load.t - just skip all when unprivileged to avoid mis calculation/run of tests
     - 00.load.t - try and account for IO::Select behavior and single output ref results in tests
