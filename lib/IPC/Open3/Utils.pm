@@ -3,7 +3,7 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = 0.4;
+$IPC::Open3::Utils::VERSION = 0.5;
 require Exporter;
 @IPC::Open3::Utils::EXPORT    = qw(run_cmd put_cmd_in);
 @IPC::Open3::Utils::ISA       = qw(Exporter);
@@ -96,10 +96,35 @@ sub run_cmd {
         return;
     }
     
+    # this is a hack to work around an exit-before-use race condition
+    local $SIG{'PIPE'} = exists $SIG{'PIPE'} && defined $SIG{'PIPE'} ? $SIG{'PIPE'} : '';
+    my $current_sig_pipe = $SIG{'PIPE'};
+    if (exists $arg_hr->{'pre_read_print_to_stdin'}) {
+         $SIG{'PIPE'} = sub {
+             # my $oserr = $!;
+             # my $cherr = $?;
+             $stdin->close;
+             $stdout->close;
+             $stderr->close;
+             # $! = $oserr;
+             # $? = $cherr;
+             $current_sig_pipe->() if $current_sig_pipe && ref $current_sig_pipe eq 'CODE';
+         };
+    }
+    
     my $child_pid = IPC::Open3::open3( $stdin, $stdout, $stderr, @cmd ); 
+    if (exists $arg_hr->{'_pre_run_sleep'}) {
+        if(my $sec = int($arg_hr->{'_pre_run_sleep'})) {
+            sleep $sec; # undocumented, only for testing 
+        }
+    }
 
-    $sel->add($stdout) unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stdout';
-    $sel->add($stderr) unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stderr';
+    $sel->add($stdout); # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stdout';
+    $sel->add($stderr); # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stderr';
+    
+    if (exists $arg_hr->{'pre_read_print_to_stdin'}) {
+        $stdin->printflush($arg_hr->{'pre_read_print_to_stdin'});
+    }
     
     if($arg_hr->{'close_stdin'}) {
        $stdin->close();
@@ -137,9 +162,11 @@ sub run_cmd {
             }
             
             my $is_stderr = $fh eq $stderr ? 1 : 0;
-
+            
             CMD_OUTPUT:
             while ( my $cur_line = $get_next->($fh) ) {
+                next CMD_OUTPUT if exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq ($is_stderr ? 'stderr' : 'stdout');
+                
                 $is_open3_err = 1 if $is_stderr && $cur_line =~ m{^open3:};             
                 if ($is_open3_err) {
                     if (ref $arg_hr->{'open3_error'} eq 'SCALAR') {
@@ -184,12 +211,16 @@ sub run_cmd {
         }
     }
 
+    # my $oserr = $!;
+    # my $cherr = $?;
     $stdout->close;
     $stderr->close;
     $stdin->close if defined $stdin && ref $stdin eq 'IO::Handle'; #  && !$arg_hr->{'close_stdin'};
+    # $! = $oserr;
+    # $? = $cherr;
     
     waitpid $child_pid, 0;
-
+     
     if (defined $caught_child || defined $caught_oserr) {
         $? = $caught_child;
         $! = $caught_oserr;
@@ -215,7 +246,7 @@ sub put_cmd_in {
 
     $arg_hr->{'handler'} = sub {
         my ($cur_line, $stdin, $is_stderr, $is_open3_err, $short_circuit_loop_sr) = @_;
-       
+
         my $mod = $is_stderr ? $err : $out;
         return 1 if !defined $mod;
         
@@ -308,7 +339,7 @@ IPC::Open3::Utils - Functions for facilitating some of the most common open3() u
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.4
+This document describes IPC::Open3::Utils version 0.5
 
 =head1 DESCRIPTION
 
@@ -702,6 +733,8 @@ L<http://rt.cpan.org>.
  - 'blocking' $io->blocking($v)
 
  - add filehandle support to put_cmd_in()
+
+ - find out why $! seems to always be 'Bad File Descriptor' on some systems
 
 =head1 AUTHOR
 
