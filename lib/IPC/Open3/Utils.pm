@@ -3,25 +3,28 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = 0.5;
+$IPC::Open3::Utils::VERSION = '0.6';
+
 require Exporter;
-@IPC::Open3::Utils::EXPORT    = qw(run_cmd put_cmd_in);
 @IPC::Open3::Utils::ISA       = qw(Exporter);
+@IPC::Open3::Utils::EXPORT    = qw(run_cmd put_cmd_in);
 @IPC::Open3::Utils::EXPORT_OK = qw(
-    run_cmd                 put_cmd_in              
-    child_error_ok          child_error_failed_to_execute 
-    child_error_exit_signal child_error_seg_faulted 
-    child_error_core_dumped child_error_exit_value
-    create_ipc_open3_utils_wrap_script
+  run_cmd                 put_cmd_in
+  child_error_ok          child_error_failed_to_execute
+  child_error_exit_signal child_error_seg_faulted
+  child_error_core_dumped child_error_exit_value
+  create_ipc_open3_utils_wrap_script
 );
 %IPC::Open3::Utils::EXPORT_TAGS = (
     'all' => \@IPC::Open3::Utils::EXPORT_OK,
     'cmd' => [qw(run_cmd put_cmd_in)],
-    'err' => [qw(
-        child_error_ok          child_error_failed_to_execute 
-        child_error_exit_signal child_error_seg_faulted 
-        child_error_core_dumped child_error_exit_value
-    )],
+    'err' => [
+        qw(
+          child_error_ok          child_error_failed_to_execute
+          child_error_exit_signal child_error_seg_faulted
+          child_error_core_dumped child_error_exit_value
+          )
+    ],
 );
 
 require IO::Select;
@@ -31,104 +34,93 @@ require IO::Handle;
 sub run_cmd {
     my @cmd = @_;
     my $arg_hr = ref $cmd[-1] eq 'HASH' ? pop(@cmd) : {};
+    $arg_hr->{'ignore_handle'} ||= '';
 
-    if ( ref $arg_hr->{'handler'} ne 'CODE') {
+    if ( ref $arg_hr->{'handler'} ne 'CODE' ) {
         $arg_hr->{'handler'} = sub {
-            my ($cur_line, $stdin, $is_stderr, $is_open3_err, $short_circuit_loop_sr) = @_;
+            my ( $cur_line, $stdin, $is_stderr, $is_open3_err, $short_circuit_loop_sr ) = @_;
             if ($is_stderr) {
                 print STDERR $cur_line;
             }
             else {
-                print $cur_line;
+                print STDOUT $cur_line;
             }
-            
+
             return 1;
         };
     }
 
-    if ($arg_hr->{'child_error'}) {
-     
-        $? = 0;
-        $! = 0;
-        if (!exists $arg_hr->{'child_error_uniq'}) {
-            $arg_hr->{'child_error_uniq'} = rand();
-        }
-        
-        if (!exists $arg_hr->{'child_error_wrapper'}) {
-            $arg_hr->{'child_error_wrapper'} = 'ipc_open3_utils_wrap';
-            if (-x "./$arg_hr->{'child_error_wrapper'}") {
-                $arg_hr->{'child_error_wrapper'} = "./$arg_hr->{'child_error_wrapper'}";
-            }
-        }
-
-        unshift @cmd, $arg_hr->{'child_error_wrapper'}, $arg_hr->{'child_error_uniq'};
-    }
-
-    
     my $stdout = IO::Handle->new();
-    my $stderr = IO::Handle->new(); # TODO ? $arg_hr->{'combine_fhs'} ? $stdout : IO::Handle->new(); && then  no select()
+    my $stderr = IO::Handle->new();    # TODO ? $arg_hr->{'combine_fhs'} ? $stdout : IO::Handle->new(); && then  no select()
     my $stdin  = IO::Handle->new();
     my $sel    = IO::Select->new();
 
-    if (ref $arg_hr->{'autoflush'} eq 'HASH') {
-        $stdout->autoflush(1) if $arg_hr->{'autoflush'}{'stdout'}; 
+    if ( ref $arg_hr->{'autoflush'} eq 'HASH' ) {
+        $stdout->autoflush(1) if $arg_hr->{'autoflush'}{'stdout'};
         $stderr->autoflush(1) if $arg_hr->{'autoflush'}{'stderr'};
-        $stdin->autoflush(1)  if $arg_hr->{'autoflush'}{'stdin'};        
+        $stdin->autoflush(1)  if $arg_hr->{'autoflush'}{'stdin'};
     }
-    
-    # this is kind of a hack so we don't have to wrap the 
+
+    # this is kind of a hack so we don't have to wrap the
     # open3() call in an eval {} (eval { open3() } can make funny things happen)
-    if(!@cmd) {
-        $! = 22;
-        
-        if (ref $arg_hr->{'open3_error'} eq 'SCALAR') {
-            ${$arg_hr->{'open3_error'}} = "$!";
+    if ( !@cmd ) {
+        $! = 22;       # Invalid argument
+        $? = 65280;    # system();print $?;
+
+        if ( ref $arg_hr->{'open3_error'} eq 'SCALAR' ) {
+            ${ $arg_hr->{'open3_error'} } = "$!";
         }
         else {
             $arg_hr->{'open3_error'} = "$!";
         }
 
-        if ( $arg_hr->{'carp_open3_errors'}) {
+        if ( $arg_hr->{'carp_open3_errors'} ) {
             require Carp;
             Carp::carp("$!");
         }
-        
+
         return;
     }
-    
+
     # this is a hack to work around an exit-before-use race condition
     local $SIG{'PIPE'} = exists $SIG{'PIPE'} && defined $SIG{'PIPE'} ? $SIG{'PIPE'} : '';
     my $current_sig_pipe = $SIG{'PIPE'};
-    if (exists $arg_hr->{'pre_read_print_to_stdin'}) {
-         $SIG{'PIPE'} = sub {
-             # my $oserr = $!;
-             # my $cherr = $?;
-             $stdin->close;
-             $stdout->close;
-             $stderr->close;
-             # $! = $oserr;
-             # $? = $cherr;
-             $current_sig_pipe->() if $current_sig_pipe && ref $current_sig_pipe eq 'CODE';
-         };
+    if ( exists $arg_hr->{'pre_read_print_to_stdin'} ) {
+        $SIG{'PIPE'} = sub {
+
+            # my $oserr = $!;
+            # my $cherr = $?;
+            $stdin->close if defined $stdin && ref $stdin eq 'IO::Handle';    #  && !$arg_hr->{'close_stdin'};
+            $stdout->close;
+            $stderr->close;
+
+            # $! = $oserr;
+            # $? = $cherr;
+            $current_sig_pipe->() if $current_sig_pipe && ref $current_sig_pipe eq 'CODE';
+        };
     }
-    
-    my $child_pid = IPC::Open3::open3( $stdin, $stdout, $stderr, @cmd ); 
-    if (exists $arg_hr->{'_pre_run_sleep'}) {
-        if(my $sec = int($arg_hr->{'_pre_run_sleep'})) {
-            sleep $sec; # undocumented, only for testing 
+
+    # ensure these are always re-set at the beginning of an execution
+    $! = 0;
+    $? = 0;
+
+    my $child_pid = IPC::Open3::open3( $stdin, $stdout, $stderr, @cmd );
+    if ( exists $arg_hr->{'_pre_run_sleep'} ) {
+        if ( my $sec = int( $arg_hr->{'_pre_run_sleep'} ) ) {
+            sleep $sec;    # undocumented, only for testing
         }
     }
 
-    $sel->add($stdout); # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stdout';
-    $sel->add($stderr); # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stderr';
-    
-    if (exists $arg_hr->{'pre_read_print_to_stdin'}) {
-        $stdin->printflush($arg_hr->{'pre_read_print_to_stdin'});
+    $sel->add($stdout);    # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stdout';
+    $sel->add($stderr);    # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stderr';
+
+    if ( exists $arg_hr->{'pre_read_print_to_stdin'} ) {
+        $stdin->printflush( $arg_hr->{'pre_read_print_to_stdin'} );
     }
-    
-    if($arg_hr->{'close_stdin'}) {
-       $stdin->close();
-       undef $stdin;
+
+    if ( $arg_hr->{'close_stdin'} ) {
+        $stdin->close();
+        undef $stdin;
     }
 
     local *_;
@@ -136,76 +128,57 @@ sub run_cmd {
     # to avoid "Modification of readonly value attempted" errors with @_
     # You ask, "Do you mean the _open3()'s or while()'s @_? " and the answer is: "exactly!" ;p
 
-    my $is_open3_err = 0;
-    my $return_bool  = 1;
+    my $is_open3_err       = 0;
+    my $open3_err_is_exec  = 0;
+    my $return_bool        = 1;
     my $short_circuit_loop = 0;
 
     my $get_next = sub { readline(shift) };
 
-    if (my $byte_size = int($arg_hr->{'read_length_bytes'} || 0)) {
+    if ( my $byte_size = int( $arg_hr->{'read_length_bytes'} || 0 ) ) {
         my $buffer;
-        if ($arg_hr->{'child_error'}) {
-            $byte_size = 128 if $byte_size < 128;
-        }
-        $get_next = sub { shift->sysread($buffer, $byte_size);return $buffer; };
+        $byte_size = 128 if $byte_size < 128;
+        $get_next = sub { shift->sysread( $buffer, $byte_size ); return $buffer; };
     }
-    
-    my $caught_child;
-    my $caught_oserr;
-    READ_LOOP:
-    while(my @ready = $sel->can_read) {
-        HANDLE:
+
+  READ_LOOP:
+    while ( my @ready = $sel->can_read ) {
+      HANDLE:
         for my $fh (@ready) {
-            if ($fh->eof) {
+            if ( $fh->eof ) {
                 $fh->close;
                 next HANDLE;
             }
-            
+
             my $is_stderr = $fh eq $stderr ? 1 : 0;
-            
-            CMD_OUTPUT:
+
+          CMD_OUTPUT:
             while ( my $cur_line = $get_next->($fh) ) {
-                next CMD_OUTPUT if exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq ($is_stderr ? 'stderr' : 'stdout');
-                
-                $is_open3_err = 1 if $is_stderr && $cur_line =~ m{^open3:};             
+                next CMD_OUTPUT if $arg_hr->{'ignore_handle'} eq ( $is_stderr ? 'stderr' : 'stdout' );
+
+                $is_open3_err = 1 if $is_stderr && $cur_line =~ m{^open3:};
                 if ($is_open3_err) {
-                    if (ref $arg_hr->{'open3_error'} eq 'SCALAR') {
-                        ${$arg_hr->{'open3_error'}} = $cur_line;
+                    if ( ref $arg_hr->{'open3_error'} eq 'SCALAR' ) {
+                        ${ $arg_hr->{'open3_error'} } = $cur_line;
                     }
                     else {
                         $arg_hr->{'open3_error'} = $cur_line;
                     }
 
-                    if ( $arg_hr->{'carp_open3_errors'}) {
+                    if ( $arg_hr->{'carp_open3_errors'} ) {
                         require Carp;
                         Carp::carp($cur_line);
                     }
-                }
-                
-                if ($arg_hr->{'child_error'}) {
-                    if($cur_line =~ m{^IPC\:\:Open3\:\:Utils \-(\-?\d+)\-(\d+(?:\.\d+)?)\-(\d+)\-(.*)-$}) {
-                        my($exit, $uniq, $errno, $wrapper_zero) = ($1,$2,$3,$4);
-                        if ($uniq ne $arg_hr->{'child_error_uniq'})  {
-                            if (ref $arg_hr->{'child_error_uniq_mismatch'} eq 'CODE') {
-                                last READ_LOOP if $arg_hr->{'child_error_uniq_mismatch'}->($uniq, $arg_hr->{'child_error_uniq'}, $exit, $errno, $cur_line, $wrapper_zero);
-                            }
-                            next READ_LOOP;
-                        }
-                        else {
-                            $caught_child = $exit;
-                            $caught_oserr = $errno;
-                            ${$arg_hr->{'child_error_wrapper_used'}} =  $wrapper_zero if ref $arg_hr->{'child_error_wrapper_used'} eq 'SCALAR';
-                            ${$arg_hr->{'child_error'}} = $exit if ref $arg_hr->{'child_error'} eq 'SCALAR';
-                            ${$arg_hr->{'child_error_errno'}} = $errno if ref $arg_hr->{'child_error_errno'} eq 'SCALAR'; 
-                            last READ_LOOP;
-                        }
-                    }                 
+
+                    if ( $cur_line =~ m{open3: exec of .* failed at} ) {
+                        $open3_err_is_exec = 1;
+                    }
                 }
 
-                $return_bool = $arg_hr->{'handler'}->($cur_line, $stdin, $is_stderr, $is_open3_err, \$short_circuit_loop);
+                $return_bool = $arg_hr->{'handler'}->( $cur_line, $stdin, $is_stderr, $is_open3_err, \$short_circuit_loop );
 
-                last READ_LOOP if !$return_bool;                
-                last READ_LOOP if $is_open3_err && $arg_hr->{'stop_read_on_open3_err'}; # this is probably the last one anyway
+                last READ_LOOP if !$return_bool;
+                last READ_LOOP if $is_open3_err && $arg_hr->{'stop_read_on_open3_err'};    # this is probably the last one anyway
                 last READ_LOOP if $short_circuit_loop;
             }
         }
@@ -215,52 +188,51 @@ sub run_cmd {
     # my $cherr = $?;
     $stdout->close;
     $stderr->close;
-    $stdin->close if defined $stdin && ref $stdin eq 'IO::Handle'; #  && !$arg_hr->{'close_stdin'};
+    $stdin->close if defined $stdin && ref $stdin eq 'IO::Handle';                         #  && !$arg_hr->{'close_stdin'};
+
     # $! = $oserr;
     # $? = $cherr;
-    
+
     waitpid $child_pid, 0;
-     
-    if (defined $caught_child || defined $caught_oserr) {
-        $? = $caught_child;
-        $! = $caught_oserr;
-        return if !child_error_ok($?);
+
+    if ( $is_open3_err && $open3_err_is_exec && $? != -1 ) {
+        $? = -1;
     }
-    
-    return if $is_open3_err || !$return_bool;
+
+    return if $is_open3_err || !$return_bool || !child_error_ok($?);
     return 1;
 }
 
 sub put_cmd_in {
     my (@cmd) = @_;
-    
+
     my $arg_hr = ref $cmd[-1] eq 'HASH' ? pop(@cmd) : {};
 
     # not being this strict allows us to do "no" output ref quietness
     # return if @cmd < 2;
     # return if defined $cmd[-1] && !ref $cmd[-1];
     # my $err = pop(@cmd);
-    
+
     my $err = !defined $cmd[-1] || ref $cmd[-1] ? pop(@cmd) : undef;
     my $out = !defined $cmd[-1] || ref $cmd[-1] ? pop(@cmd) : $err;
 
     $arg_hr->{'handler'} = sub {
-        my ($cur_line, $stdin, $is_stderr, $is_open3_err, $short_circuit_loop_sr) = @_;
+        my ( $cur_line, $stdin, $is_stderr, $is_open3_err, $short_circuit_loop_sr ) = @_;
 
         my $mod = $is_stderr ? $err : $out;
         return 1 if !defined $mod;
-        
-        if (ref $mod eq 'SCALAR') {
-            ${ $mod } .= $cur_line;
-        } 
-        else {
-            push @{ $mod }, $cur_line;
+
+        if ( ref $mod eq 'SCALAR' ) {
+            ${$mod} .= $cur_line;
         }
-        
+        else {
+            push @{$mod}, $cur_line;
+        }
+
         return 1;
     };
-    
-    return run_cmd(@cmd, $arg_hr);
+
+    return run_cmd( @cmd, $arg_hr );
 }
 
 #####################
@@ -269,8 +241,8 @@ sub put_cmd_in {
 
 sub child_error_ok {
     my $sysrc = @_ ? shift() : $?;
-    return 1 if $sysrc eq '0';
-    return; 
+    return 1 if $sysrc == 0;
+    return;
 }
 
 sub child_error_failed_to_execute {
@@ -280,13 +252,13 @@ sub child_error_failed_to_execute {
 
 sub child_error_seg_faulted {
     my $sysrc = @_ ? shift() : $?;
-    return child_error_exit_signal($sysrc) == 11; 
+    return child_error_exit_signal($sysrc) == 11;
 }
 
 sub child_error_core_dumped {
     my $sysrc = @_ ? shift() : $?;
     return if child_error_failed_to_execute($sysrc);
-    return $sysrc & 128; 
+    return $sysrc & 128;
 }
 
 sub child_error_exit_signal {
@@ -294,42 +266,13 @@ sub child_error_exit_signal {
     return if child_error_failed_to_execute($sysrc);
     return $sysrc & 127;
 }
- 
+
 sub child_error_exit_value {
     my $sysrc = @_ ? shift() : $?;
     return $sysrc >> 8;
 }
 
-sub create_ipc_open3_utils_wrap_script {
-    my ($file, $mode) = @_;
-    $file ||= '/usr/bin/ipc_open3_utils_wrap';
-    $mode ||= '0755'; # 0755 fails 'Integer with leading zero' critic test
-
-    my $contents = q(#!/usr/bin/perl
-    my $id = $ARGV[0] =~ m{\d+(?:\.\d+)?} ? shift(@ARGV) : 0;
-    {
-        local $| = 1;
-        local $! = 0;
-        system @ARGV;
-        print "IPC::Open3::Utils -$?-$id-" . int($!) . "-$0-\n";
-    }
-);
-    
-    if (open my $fh, '>', $file) {
-        print {$fh} $contents; # or return; ?
-        close $fh or return; # system quota
-        
-        $mode = oct($mode) if substr($mode,0,1) eq '0';
-        chmod($mode,$file) or return; # $! already set    
-    }
-    else {
-        return; # $! already set
-    }
-    
-    return 1;
-}
-
-1; 
+1;
 
 __END__
 
@@ -339,7 +282,7 @@ IPC::Open3::Utils - Functions for facilitating some of the most common open3() u
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.5
+This document describes IPC::Open3::Utils version 0.6
 
 =head1 DESCRIPTION
 
@@ -351,15 +294,13 @@ The goals of this module are:
 
 =item 2 boolean check of command execution
 
-=item 3 Out of the box printing to STDOUT/STDERR or assignments to variables (see #6)
+=item 3 Out of the box printing to STDOUT/STDERR or assignments to variables (see #5)
 
-=item 4 Provide access to $? and $! like you have with system() (See L</TODO> for a note about this)
+=item 4 open3() error reporting
 
-=item 5 open3() error reporting
+=item 5 comprehensive but simple output processing handlers for flexibility (see #3)
 
-=item 6 comprehensive but simple output processing handlers for flexibility (see #3)
-
-=item 7 Lightweight utilities for examining the meaning of $? without POSIX
+=item 6 Lightweight utilities for examining the meaning of $? without POSIX
 
 =back
 
@@ -381,15 +322,14 @@ So far not too useful but its when you need more complex things than system()-li
 If you care about exactly what went wrong you can get very detailed:
  
     my $open3_error;
-    if (!run_cmd(@cmd, {'open3_error' => \$open3_error, 'child_error' => 1, })) {
+    if (!run_cmd(@cmd, {'open3_error' => \$open3_error})) {
         print "open3() said: $open3_error\n" if $open3_error;
         
         if ($!) {
             print int($!) . ": $!\n";
         }
         
-        if ($? ne '') {
-            # we already know its not but we could use: child_error_ok($?);
+        if ($?) { # or if (!child_error_ok($?)) {
         
             print "Command failed to execute.\n" if child_error_failed_to_execute($?);
             print "Command seg faulted.\n" if child_error_seg_faulted($?);
@@ -550,6 +490,10 @@ Boolean to have the command's STDIN closed immediately after the open3() call.
 
 If this is set to true then the stdin variable in your handler's arguments will be undefined.
 
+=item pre_read_print_to_stdin
+
+String to pass to the command's stdin via IO::Handle's printflush() method.
+
 =item ignore_handle 
 
 The value of this can be 'stderr' or 'stdout' and will cause the named handle to not even be included 
@@ -579,9 +523,7 @@ Those keys are 'stdout', 'stderr', 'sdtin'
 
 =item read_length_bytes
 
-Number of bytes to read from the command via sysread. The default is to use readline()
-
-If 'child_error' is set and 'read_length_bytes' is less than 128 then 'read_length_bytes' gets reset to 128.
+Number of bytes to read from the command via sysread (minimum 128). The default is to use readline()
 
 =item open3_error
 
@@ -600,69 +542,9 @@ Boolean to carp() errors from open3() itself. Default is false.
 
 Boolean to quit the loop if an open3() error is thrown. This will more than likley happen anyway, this is just explicit. Default is false.
 
-=item child_error
-
-Setting this to a true allows for L</Getting the Child Error Code (IE $?) from an open3() call>.
-
-This means, in short that $? and $! will be set like it is after a system() call.
-
-If the value is a scalar reference then the value of the SCALAR refernced will be the Child Error Code of the command (IE $?)
-
-Other related values are:
-
-=over 4
-
-=item child_error_errno
-
-A SCALAR reference whose value will be the error number (IE: $! or ERRNO) of the command.
-
-=item child_error_uniq
-
-A unique identifier string to be used internally. Defaults to rand()
-
-=item child_error_wrapper
-
-The path to the "ipc_open3_utils_wrap" script. Defaults to './ipc_open3_utils_wrap' if it is executable or else 'ipc_open3_utils_wrap' and assumes its in the PATH.
-
-=item child_error_uniq_mismatch
-
-A code ref that will be called if the output looks like a "child error" line from ipc_open3_utils_wrap but whose uniq identifier does not match 'child_error_uniq'.
-
-It gets passed the uniq id it found, the uniq id it expected, the child error it had ($?), the errno it had ($!), the current line, the wrapper script's $0.
-
-If your code ref returns true it will stop the while loop over the command. Otherwise/by default it will simply not invoke the handler for that line and go to the next line.
-
-=item child_error_wrapper_used
-
-A SCALAR reference used to store the name of the script that ended up being used as the child_error_wrapper.
-
 =back
 
 =back
-
-=back
-
-=head2 Getting the Child Error Code (IE $?) from an open3() call
-
-See L</TODO> for a note about this
-
-This functionality is acheived by wrapping the command by a script that calls system() then outputs a specially formatted line indicating the values we are interested in.
-
-If anyone has a better way to do this I'd be very ineterested!
-
-The script can be in ., PATH, or specified via the L</%args> key 'child_error_wrapper'.
-
-It can  be created with this convienience function:
-
-=head3 create_ipc_open3_utils_wrap_script();
-
-The first, optional argument, is the file to create/update. Defaults to /usr/bin/ipc_open3_utils_wrap.
-
-The second, optional argument, is the mode. Defaults to 0755.
-
-B<It is not recommended to call it something else besides 'ipc_open3_utils_wrap' as it will require the 'child_error_wrapper' key all the time.>
-
-Returns true on success, false other wise. Be sure to check $! for the reason why it failed.
 
 =head2 Child Error Code Exit code utilities
 
@@ -725,8 +607,6 @@ C<bug-ipc-open3-utils@rt.cpan.org>, or through the web interface at
 L<http://rt.cpan.org>.
 
 =head1 TODO
-
- - clarify when wrapper is needed (e.g. SIGCHLD = ignore), improve/simplify/document non-wrapped erro value logic
  
  - abort loop, blocks ? (close before waitpid ?  autoflush() by default ? if not closed && !autoflushed() finish read ?)
  

@@ -1,4 +1,4 @@
-use Test::More tests => 89;
+use Test::More tests => 64;
 
 use lib '../lib', 'lib';
 
@@ -17,7 +17,7 @@ if (open my $fh, '>', $script) {
     
 require Time::HiRes;
 
-my ($n,$e,$p,$rc) = @ARGV;
+my ($n,$e,$p) = @ARGV;
 $n = abs(int($n)) || 1;
 $e = abs(int($e)) || 0;
 $p = abs(int($p)) || 0;
@@ -28,10 +28,6 @@ if ($p) {
     my $num = <STDIN>;
     $num =~ s{\D+}{};
     print "You said -$num-\n";    
-}
-
-if($rc) {
-    print "IPC::Open3::Utils -73-9.9999999-37-$0-\n";    
 }
 
 for (1 .. $n) {
@@ -50,26 +46,9 @@ my @cmd = ($^X,$script);
 my @one = ("expected stdout\n", "expected stderr\n");
 
 SKIP: {
-    skip "Could not create executable script for testing: $!", 88 if !-x $script;
-    skip "\n\$^X is not set!\n", 88 if !$^X;
-    skip 'Insufficient permissions to test create_ipc_open3_utils_wrap_script()', 88 if !create_ipc_open3_utils_wrap_script();
-    
-    ok(-x '/usr/bin/ipc_open3_utils_wrap', 'create wrap script no args'); 
-    # 0755
-
-    create_ipc_open3_utils_wrap_script('./test.1');
-    ok(-x './test.1', 'create wrap script file arg');
-
-    create_ipc_open3_utils_wrap_script('./test.2', 0644);
-    ok(-e './test.2' && !-x './test.2', 'create wrap script file && mode (oct) args');
-
-    create_ipc_open3_utils_wrap_script('./test.3', "0644");
-    ok(-e './test.3' && !-x './test.3', 'create wrap script file && mode (string) args');   
- 
-    # no need to risk breaking system wide util by goofing the mode:
-    #    create_ipc_open3_utils_wrap_script(undef, $mode)
-
-    
+    skip "Could not create executable script for testing: $!", 70 if !-x $script;
+    skip "\n\$^X is not set!\n", 70 if !$^X;
+   
     SKIP: {
    
         # To verify that the default handler goes where it should, manually run these commands in t/:
@@ -120,8 +99,6 @@ SKIP: {
 
     SKIP: {
    
-        skip 'System wrapper is not executable', 26 if !-x '/usr/bin/ipc_open3_utils_wrap';
-
         my $wasclosed = 1;
         my $output = '';
         my $handler = 0;
@@ -144,12 +121,13 @@ SKIP: {
                   'stdout' => 1,
                   'stderr' => 1,
               },
+              '_pre_run_sleep' => 1, # to avoid skip 'stderr weirdness X, skipping test' ?
         });
         ok($rc, 'returns true when handler returns true');
         ok($handler, 'handler key used');
         SKIP: {
-            # TODO: figure out why this happens consistently on some servers and consistently not on others
-            skip "stderr weirdness X, skipping test", 2 if $output eq "expected stderr\n";
+            # Order issues happen consistently on some servers and consistently not on others. Appears ot simply be timing and not much we can do about it. tests get around it by using undocumented '_pre_run_sleep' sleep
+            # skip "stderr weirdness X, skipping test", 2 if $output eq "expected stderr\n";
             ok($output eq $one[0], 'short circuit scalar ref set to true stops while()'); # X this fails because stderr happens before stdout
             ok(!$my_is_stderr, '$is_stderr is false when we are on STDOUT'); # X this fails because stderr happens before stdout
         }
@@ -196,89 +174,18 @@ SKIP: {
             local $? = 0;
             local $! = 42;
             ok($? == 0 && $! != 0 , 'pre test variable sanity check');
-            my $rc = run_cmd(@cmd,1,1,{'handler' => sub { return 1; }, 'child_error' => 1});
+            my $rc = run_cmd(@cmd,1,1,{'handler' => sub { return 1; }});
             # use Data::Dumper;Test::More::diag($? . " && " . Dumper(int($!)));
-            ok($? != 0 && $! == 0, 'child_error ARG as string gets vars set');
             ok(!$rc,'rc is failed on exit 1');
         }
 
         {
             local $? = 0;
             local $! = 42;
-            my $child;
-            my $errno;
             ok($? == 0 && $! != 0 , 'pre test variable sanity check w/ ref');
-            my $rc = run_cmd(@cmd,1,1,{'handler' => sub { return 1; }, 'child_error' => \$child, 'child_error_errno' => \$errno,});
-            ok($child == $?,'child_error scalar ref assigned value w/ ref');
-            ok($errno == $!,'child_error_errno scalar ref assigned value w/ ref');
-            ok($? != 0 && $! == 0, 'child_error ARG as string gets vars set w/ ref');
+            my $rc = run_cmd(@cmd,1,1,{'handler' => sub { return 1; }});
             ok(!$rc,'rc is failed on exit 1 w/ ref');
         }
-
-        SKIP: {
-            skip 'child_error_wrapper test script missing or not executable', 14 if !-x './test.1';
-    
-            my $output = '';
-            my ($uniq_seen, $uniq_expected, $exit, $errno, $cur_line, $wrapper_zero);
-            my $rc = put_cmd_in(@cmd,1,0,0,1,\$output, {
-                'handler' => sub {return 1; }, 
-                'child_error' => 1, 
-                'child_error_uniq' => '0.42',
-                'child_error_wrapper' => './test.1',
-                'child_error_uniq_mismatch' => sub {
-                    ($uniq_seen, $uniq_expected, $exit, $errno, $cur_line, $wrapper_zero) = @_;
-                    $zero = $wrapper_zero;
-                    return 1;
-                },
-            });
-            ok($uniq_seen eq '9.9999999', 'uniq seen arg sent correctly');
-            ok($uniq_expected eq '0.42', 'child_error_uniq used');
-            ok($exit == 73, 'exit arg sent correctly');
-            ok($errno == 37, 'errno arg sent correctly');
-            ok($cur_line =~ m/IPC\:\:Open3\:\:Utils/, 'cur_line arg sent correctly');
-            ok($wrapper_zero =~ m/ipc_opens_utils_testing/, 'mismatch wrapper parsed correctly');
-            SKIP: {
-                # TODO: figure out why this happens consistently on some servers and consistently not on others
-                skip "stderr weirdness X, skipping test", 1 if $output eq "expected stderr\n";
-                ok($output eq '', "child_error_uniq_mismatch true short circuits");
-            }
-            ok($rc, 'child_error_uniq_mismatch true short circuit RC is still true');
-    
-            # child_error_uniq_mismatch false
-            my $out = '';
-            my $err = '';
-            $rc = put_cmd_in(@cmd,1,0,0,1,\$out, \$err, {
-                'child_error' => 1,
-                'child_error_wrapper' => './test.1', 
-                'child_error_wrapper_used' => \$zero,
-                'child_error_uniq_mismatch' => sub {
-                    
-                    return;
-                },
-            });
-            ok($zero, 'child_error_wrapper_used SCALAR ref used');
-            ok($zero =~ m/test\.1/, 'correct child_error_wrapper used');
-            # ($out eq $one[1] && $err eq $one[0]) || 
-            SKIP: {
-                # TODO: figure out why this happens consistently on some servers and consistently not on others
-                skip "stderr weirdness X, skipping test", 1 if $err eq '';
-                ok(($out eq $one[0] && $err eq $one[1]), 'child_error_uniq_mismatch false does not short circuit'); # X this happens because stderr is ''
-            }
-            ok($rc, 'child_error_uniq_mismatch false does not short circuit RC is still true');
-        
-            # no mismatch == ignored
-            my $handler = 0;
-            $rc = run_cmd(@cmd, {
-                'handler' => sub {return 1; }, 
-                'child_error' => 1, 
-                'child_error_uniq_mismatch' => sub {
-                    $handler++;
-                    return 1;
-                },
-            });
-            ok(!$handler, 'no false line == no child_error_uniq_mismatch call');
-            ok($rc, 'no false line == no child_error_uniq_mismatch call ==  RC is still true');
-        };
     
         {
             my %args;
@@ -293,19 +200,8 @@ SKIP: {
 
         {
             my $child = undef;
-            my $rc = put_cmd_in(@cmd,1,1,[],[],{'child_error' => \$child});
+            my $rc = put_cmd_in(@cmd,1,1,[],[]);
             ok(!$rc, 'put_cmd_in exit one returns false'); 
-            ok(defined $child, 'put_cmd_in 2 output refs ARGS modifies behavior');
-        }
-        {
-            my $child = undef;
-            put_cmd_in(@cmd,1,1,[],{'child_error' => \$child});
-            ok(defined $child, 'put_cmd_in 1 output ref ARGS modifies behavior');
-        }
-        {
-            my $child = undef;
-            put_cmd_in(@cmd,1,1,{'child_error' => \$child});
-            ok(defined $child, 'put_cmd_in 0 output refs ARGS modifies behavior');
         }
  
         # TODO tests for 'autoflush' key
@@ -420,8 +316,3 @@ SKIP: {
     ok(child_error_exit_value(255) == 0, 'child_error_exit_value 0 ARG');
 
 };
-
-for my $file ($script, './test.1', './test.2', './test.3') {
-    next if !-e $file;
-    unlink($file) or diag("Could not unlink $file: $!");
-}

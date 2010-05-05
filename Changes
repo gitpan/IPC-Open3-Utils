@@ -1,5 +1,11 @@
 Revision history for IPC-Open3-Utils
 
+0.6  Wed May  5 23:15:58 2010
+    - drop wrapper script (and related child_error[_] args hr keys), it is not needed to get $? and $! properly
+    - document pre_read_print_to_stdin
+    - perltidy
+    - when cmd is empty set $? to 65280 like system()
+
 0.5  Mon May 18 21:23:49 2009
     - check for "stderr weirdness" situation and skip tests for now, added TODO for more investigation
     - moved 'ignore_handle' logic to after the read to eliminate possibility it'd block (but it's still ignored of course)
