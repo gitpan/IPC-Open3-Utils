@@ -3,7 +3,7 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = '0.6';
+$IPC::Open3::Utils::VERSION = '0.7';
 
 require Exporter;
 @IPC::Open3::Utils::ISA       = qw(Exporter);
@@ -105,95 +105,173 @@ sub run_cmd {
     $? = 0;
 
     my $child_pid = IPC::Open3::open3( $stdin, $stdout, $stderr, @cmd );
-    if ( exists $arg_hr->{'_pre_run_sleep'} ) {
-        if ( my $sec = int( $arg_hr->{'_pre_run_sleep'} ) ) {
-            sleep $sec;    # undocumented, only for testing
+
+    $arg_hr->{'timeout'} = exists $arg_hr->{'timeout'} ? abs( $arg_hr->{'timeout'} ) : 0;
+
+    my $alarm;
+    my $original_alarm;
+
+    # small hack to avoid uninitialized value warnings w/ out lots of warning.pm voo-doo to
+    #    keep the "no warnings 'uninitialized'" scoped to this assignment but the local() scoped from here on
+    # local $SIG{'ALRM'} = $SIG{'ALRM'};# this gives uninitialized value warnings
+    my $no_unit_warnings = $SIG{'ALRM'};
+    local $SIG{'ALRM'} ||= '';
+    if ( $arg_hr->{'timeout'} ) {
+        if ( $arg_hr->{'timeout_is_microseconds'} ) {
+            if ( defined &Time::HiRes::ualarm ) {
+                $alarm = \&Time::HiRes::ualarm;
+            }
+            else {
+                $alarm = defined &Time::HiRes::alarm ? \&Time::HiRes::alarm : sub { alarm( $_[0] ) };    # \&CORE::alarm, \&CORE::GLOBAL::alarm, etc don't work ...
+                $arg_hr->{'timeout'}                 = $arg_hr->{'timeout'} / 1_000_000;
+                $arg_hr->{'timeout'}                 = 1 if $arg_hr->{'timeout'} < 1;
+                $arg_hr->{'timeout_is_microseconds'} = 0;
+            }
+        }
+        else {
+            $alarm = defined &Time::HiRes::alarm ? \&Time::HiRes::alarm : sub { alarm( $_[0] ) };        # \&CORE::alarm, \&CORE::GLOBAL::alarm, etc don't work ...
+        }
+
+        $SIG{'ALRM'} = sub { die 'Alarm clock' };
+        $original_alarm = $alarm->( $arg_hr->{'timeout'} );
+
+        # undocumented, for testing purposes only
+        if ( exists $arg_hr->{'_timeout_info'} && ref( $arg_hr->{'_timeout_info'} ) eq 'HASH' ) {
+            %{ $arg_hr->{'_timeout_info'} } = (
+                'timeout'                 => $arg_hr->{'timeout'},
+                'timeout_is_microseconds' => $arg_hr->{'timeout_is_microseconds'},
+                'Time::Hires'             => $INC{'Time/HiRes.pm'},
+                'Time::Hires::ualarm'     => defined &Time::HiRes::ualarm ? 1 : 0,
+                'Time::Hires::alarm'      => defined &Time::HiRes::alarm ? 1 : 0,
+                'original_alarm'          => $original_alarm,
+            );
         }
     }
-
-    $sel->add($stdout);    # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stdout';
-    $sel->add($stderr);    # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stderr';
-
-    if ( exists $arg_hr->{'pre_read_print_to_stdin'} ) {
-        $stdin->printflush( $arg_hr->{'pre_read_print_to_stdin'} );
+    else {
+        no warnings 'uninitialized';    # at least we can scopt it here ...
+        $SIG{'ALRM'} = $no_unit_warnings;
     }
-
-    if ( $arg_hr->{'close_stdin'} ) {
-        $stdin->close();
-        undef $stdin;
-    }
-
-    local *_;
-
-    # to avoid "Modification of readonly value attempted" errors with @_
-    # You ask, "Do you mean the _open3()'s or while()'s @_? " and the answer is: "exactly!" ;p
 
     my $is_open3_err       = 0;
     my $open3_err_is_exec  = 0;
     my $return_bool        = 1;
     my $short_circuit_loop = 0;
 
-    my $get_next = sub { readline(shift) };
+    eval {
 
-    if ( my $byte_size = int( $arg_hr->{'read_length_bytes'} || 0 ) ) {
-        my $buffer;
-        $byte_size = 128 if $byte_size < 128;
-        $get_next = sub { shift->sysread( $buffer, $byte_size ); return $buffer; };
-    }
-
-  READ_LOOP:
-    while ( my @ready = $sel->can_read ) {
-      HANDLE:
-        for my $fh (@ready) {
-            if ( $fh->eof ) {
-                $fh->close;
-                next HANDLE;
-            }
-
-            my $is_stderr = $fh eq $stderr ? 1 : 0;
-
-          CMD_OUTPUT:
-            while ( my $cur_line = $get_next->($fh) ) {
-                next CMD_OUTPUT if $arg_hr->{'ignore_handle'} eq ( $is_stderr ? 'stderr' : 'stdout' );
-
-                $is_open3_err = 1 if $is_stderr && $cur_line =~ m{^open3:};
-                if ($is_open3_err) {
-                    if ( ref $arg_hr->{'open3_error'} eq 'SCALAR' ) {
-                        ${ $arg_hr->{'open3_error'} } = $cur_line;
-                    }
-                    else {
-                        $arg_hr->{'open3_error'} = $cur_line;
-                    }
-
-                    if ( $arg_hr->{'carp_open3_errors'} ) {
-                        require Carp;
-                        Carp::carp($cur_line);
-                    }
-
-                    if ( $cur_line =~ m{open3: exec of .* failed at} ) {
-                        $open3_err_is_exec = 1;
-                    }
-                }
-
-                $return_bool = $arg_hr->{'handler'}->( $cur_line, $stdin, $is_stderr, $is_open3_err, \$short_circuit_loop );
-
-                last READ_LOOP if !$return_bool;
-                last READ_LOOP if $is_open3_err && $arg_hr->{'stop_read_on_open3_err'};    # this is probably the last one anyway
-                last READ_LOOP if $short_circuit_loop;
+        if ( exists $arg_hr->{'_pre_run_sleep'} ) {
+            if ( my $sec = int( $arg_hr->{'_pre_run_sleep'} ) ) {
+                sleep $sec;    # undocumented, only for testing
             }
         }
+
+        $sel->add($stdout);    # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stdout';
+        $sel->add($stderr);    # unless exists $arg_hr->{'ignore_handle'} && $arg_hr->{'ignore_handle'} eq 'stderr';
+
+        if ( exists $arg_hr->{'pre_read_print_to_stdin'} ) {
+            if ( my $type = ref( $arg_hr->{'pre_read_print_to_stdin'} ) ) {
+                if ( $type eq 'ARRAY' ) {
+                    for my $line ( @{ $arg_hr->{'pre_read_print_to_stdin'} } ) {
+                        $stdin->printflush($line);
+                    }
+                }
+                elsif ( $type eq 'CODE' ) {
+                    for my $line ( $arg_hr->{'pre_read_print_to_stdin'}->() ) {
+                        $stdin->printflush($line);
+                    }
+                }
+            }
+            else {
+                $stdin->printflush( $arg_hr->{'pre_read_print_to_stdin'} );
+            }
+        }
+
+        if ( $arg_hr->{'close_stdin'} ) {
+            $stdin->close();
+            undef $stdin;
+        }
+
+        local *_;
+
+        # to avoid "Modification of readonly value attempted" errors with @_
+        # You ask, "Do you mean the _open3()'s or while()'s @_? " and the answer is: "exactly!" ;p
+
+        my $get_next = sub { readline(shift) };
+
+        if ( my $byte_size = int( $arg_hr->{'read_length_bytes'} || 0 ) ) {
+            my $buffer;
+            $byte_size = 128 if $byte_size < 128;
+            $get_next = sub { shift->sysread( $buffer, $byte_size ); return $buffer; };
+        }
+
+      READ_LOOP:
+        while ( my @ready = $sel->can_read ) {
+          HANDLE:
+            for my $fh (@ready) {
+                if ( $fh->eof ) {
+                    $fh->close;
+                    next HANDLE;
+                }
+
+                my $is_stderr = $fh eq $stderr ? 1 : 0;
+
+              CMD_OUTPUT:
+                while ( my $cur_line = $get_next->($fh) ) {
+                    next CMD_OUTPUT if $arg_hr->{'ignore_handle'} eq ( $is_stderr ? 'stderr' : 'stdout' );
+
+                    $is_open3_err = 1 if $is_stderr && $cur_line =~ m{^open3:};
+                    if ($is_open3_err) {
+                        if ( ref $arg_hr->{'open3_error'} eq 'SCALAR' ) {
+                            ${ $arg_hr->{'open3_error'} } = $cur_line;
+                        }
+                        else {
+                            $arg_hr->{'open3_error'} = $cur_line;
+                        }
+
+                        if ( $arg_hr->{'carp_open3_errors'} ) {
+                            require Carp;
+                            Carp::carp($cur_line);
+                        }
+
+                        if ( $cur_line =~ m{open3: exec of .* failed at} ) {
+                            $open3_err_is_exec = 1;
+                        }
+                    }
+
+                    $return_bool = $arg_hr->{'handler'}->( $cur_line, $stdin, $is_stderr, $is_open3_err, \$short_circuit_loop );
+
+                    last READ_LOOP if !$return_bool;
+                    last READ_LOOP if $is_open3_err && $arg_hr->{'stop_read_on_open3_err'};    # this is probably the last one anyway
+                    last READ_LOOP if $short_circuit_loop;
+                }
+            }
+        }
+
+        # my $oserr = $!;
+        # my $cherr = $?;
+        $stdout->close;
+        $stderr->close;
+        $stdin->close if defined $stdin && ref $stdin eq 'IO::Handle';                         #  && !$arg_hr->{'close_stdin'};
+
+        # $! = $oserr;
+        # $? = $cherr;
+
+        waitpid $child_pid, 0;
+
+    };
+
+    if ( $arg_hr->{'timeout'} && defined $original_alarm ) {
+        $alarm->($original_alarm);
     }
 
-    # my $oserr = $!;
-    # my $cherr = $?;
-    $stdout->close;
-    $stderr->close;
-    $stdin->close if defined $stdin && ref $stdin eq 'IO::Handle';                         #  && !$arg_hr->{'close_stdin'};
+    if ($@) {
 
-    # $! = $oserr;
-    # $? = $cherr;
-
-    waitpid $child_pid, 0;
+        # if ($@ =~ m/^Alarm clock /) {
+        #     $! = 60;
+        #     # $? = ??;
+        # }
+        return;
+    }
 
     if ( $is_open3_err && $open3_err_is_exec && $? != -1 ) {
         $? = -1;
@@ -278,11 +356,11 @@ __END__
 
 =head1 NAME
 
-IPC::Open3::Utils - Functions for facilitating some of the most common open3() uses
+IPC::Open3::Utils - simple API encapsulating the most common open3() logic/uses including handling various corne cases and caveats
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.6
+This document describes IPC::Open3::Utils version 0.7
 
 =head1 DESCRIPTION
 
@@ -458,6 +536,8 @@ A code reference that should return a boolean status. If it returns false run_cm
 
 If it returns true and assuming open3() threw no errors that'd make them return false then run_cmd() and put_cmd_in() will return true.
 
+Any exceptions thrown in the handler are caught and put in $@. Then the open3 cleanup happens and the function returns false.
+
 It gets the following arguments sent to it:
 
 =over 4
@@ -484,6 +564,42 @@ This is useful for efficiency so you can stop processing the command once you ge
 
 =over 4
 
+=item timeout
+
+The number of seconds you want to allow the execution to run. If it takes longer than the specified amount, it sets $@ to "Alarm clock" ($! will probably be 4), does the open3 cleanup, and returns false.
+
+If L<Time::HiRes>'s alarm() is available it uses that instead of alarm(). In that case you can set its value to the number of microseconds you want to allow it to run.
+
+    
+    run_cmd( @cmd, { 'timeout' => 42 } ); 
+
+    run_cmd( @cmd, { 'timeout' => 3.14159 } ); # The '.14159' is sort of pointless unless you've brought in Time::HiRes
+
+Any previous alarm is set back to what it was once it is complete. 
+
+All normal alarm/sleep/computer time caveats apply. That includes mixing large normal alarm() w/ HiRes alarms. For example, in the first command below it seems like Time::HiRes's alarm() should be much closer to 10K but it says over 8.5K seconds have elapsed, the second looks like what we expect:
+
+    $ perl -mTime::HiRes -le 'print alarm(10_000);print Time::HiRes::alarm(100.1);print alarm(0);'
+    0
+    1410.065364
+    101
+    $ 
+    
+    $ perl -mTime::HiRes -le 'print alarm(1_000);print Time::HiRes::alarm(100.1);print alarm(0);'
+    0
+    999.999876
+    101
+    $
+
+=item timeout_is_microseconds
+
+If you want to specify a microsecond timeout you can set 'timeout_is_microseconds' to true.
+
+If L<Time::HiRes>'s ualarm() is not available the value is turned into seconds and a normal alarm is used. If this happens and the result is under one second then the alarm is set for 1 second.
+
+    use Time::HiRes;
+    run_cmd( 'blink', { 'timeout' => 350_001, 'timeout_is_microseconds' => 1 } );
+
 =item close_stdin
 
 Boolean to have the command's STDIN closed immediately after the open3() call.
@@ -492,7 +608,13 @@ If this is set to true then the stdin variable in your handler's arguments will 
 
 =item pre_read_print_to_stdin
 
+The value can be one of three types:
+
 String to pass to the command's stdin via IO::Handle's printflush() method.
+
+Array ref of strings to pass to the command's stdin via IO::Handle's printflush() method.
+
+Code ref that returns one or more strings to pass to the command's stdin via IO::Handle's printflush() method.
 
 =item ignore_handle 
 
@@ -608,13 +730,17 @@ L<http://rt.cpan.org>.
 
 =head1 TODO
  
- - abort loop, blocks ? (close before waitpid ?  autoflush() by default ? if not closed && !autoflushed() finish read ?)
- 
- - 'blocking' $io->blocking($v)
+ - autoflush() by default ?
 
- - add filehandle support to put_cmd_in()
+ - if not closed && !autoflushed() finish read ?
+
+ - Add 'blocking' $io->blocking($value) ?
+
+ - Add filehandle support to put_cmd_in()
 
  - find out why $! seems to always be 'Bad File Descriptor' on some systems
+
+ - no_hires_timeout attribute to forceusing built in alarm() even when Time::HiRes functions are available ?
 
 =head1 AUTHOR
 

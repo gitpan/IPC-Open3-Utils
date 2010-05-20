@@ -1,4 +1,4 @@
-use Test::More tests => 64;
+use Test::More tests => 67;
 
 use lib '../lib', 'lib';
 
@@ -316,3 +316,7 @@ SKIP: {
     ok(child_error_exit_value(255) == 0, 'child_error_exit_value 0 ARG');
 
 };
+
+ok(run_cmd(@cmd, {'handler' => sub { 1 } }), 'sanity check that cmd by itself returns true'); # sub { 1 } || put_cmd_in() == silent
+ok(!run_cmd(@cmd, {'handler' => sub {die 'epoch fail'} }), "handler dies returns false");
+ok($@ =~ m/epoch fail/, 'handler dies sets $@');

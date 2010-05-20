@@ -7,6 +7,8 @@ lib/IPC/Open3/Utils.pm
 t/00.load.t
 t/01.execfail.t
 t/02.pre_read_print_to_stdin.t
+t/03.timeout.t
+t/04.timeout_hires.t
 t/non-executable
 t/perlcritic.t
 t/pod-coverage.t

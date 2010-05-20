@@ -1,4 +1,4 @@
-use Test::More tests => 6;
+use Test::More tests => 8;
 
 use lib '../lib', 'lib';
 
@@ -11,6 +11,13 @@ my $output = ''; # my $output; ;
 my $rc = IPC::Open3::Utils::put_cmd_in(q{perl -e 'my $line=<STDIN>;print $line;'}, \$output, { 'pre_read_print_to_stdin' => "Hello World\n"});
 ok($output eq "Hello World\n", "pre_read_print_to_stdin as string properly handled");
 
+$output = ''; 
+$rc = IPC::Open3::Utils::put_cmd_in(q{perl -e 'for (1..2) { my $line=readline(STDIN);print $line }'}, \$output, { 'pre_read_print_to_stdin' => ["Hello World\n","test\n"]});
+ok($output eq "Hello World\ntest\n", "pre_read_print_to_stdin as array ref of strings properly handled");
+
+$output = ''; 
+$rc = IPC::Open3::Utils::put_cmd_in(q{perl -e 'for (1..2) { my $line=readline(STDIN);print $line }'}, \$output, { 'pre_read_print_to_stdin' => sub { return "Hello World\n","test\n" } });
+ok($output eq "Hello World\ntest\n", "pre_read_print_to_stdin as code ref that returns  array of strings properly handled");
 
 diag("Testing for exit-before-write-to-stdin race condition");
 $output = '';

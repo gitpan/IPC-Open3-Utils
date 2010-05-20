@@ -1,5 +1,10 @@
 Revision history for IPC-Open3-Utils
 
+0.7  Tue May 18 23:17:12 2010
+    - rt 57609: add 'timeout' attributes
+    - handler fatalities caught and put in $@
+    - rt 57612: support array and code ref in pre_read_print_to_stdin
+    
 0.6  Wed May  5 23:15:58 2010
     - drop wrapper script (and related child_error[_] args hr keys), it is not needed to get $? and $! properly
     - document pre_read_print_to_stdin
