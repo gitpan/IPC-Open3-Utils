@@ -3,7 +3,7 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = '0.7';
+$IPC::Open3::Utils::VERSION = '0.8';
 
 require Exporter;
 @IPC::Open3::Utils::ISA       = qw(Exporter);
@@ -61,27 +61,6 @@ sub run_cmd {
         $stdin->autoflush(1)  if $arg_hr->{'autoflush'}{'stdin'};
     }
 
-    # this is kind of a hack so we don't have to wrap the
-    # open3() call in an eval {} (eval { open3() } can make funny things happen)
-    if ( !@cmd ) {
-        $! = 22;       # Invalid argument
-        $? = 65280;    # system();print $?;
-
-        if ( ref $arg_hr->{'open3_error'} eq 'SCALAR' ) {
-            ${ $arg_hr->{'open3_error'} } = "$!";
-        }
-        else {
-            $arg_hr->{'open3_error'} = "$!";
-        }
-
-        if ( $arg_hr->{'carp_open3_errors'} ) {
-            require Carp;
-            Carp::carp("$!");
-        }
-
-        return;
-    }
-
     # this is a hack to work around an exit-before-use race condition
     local $SIG{'PIPE'} = exists $SIG{'PIPE'} && defined $SIG{'PIPE'} ? $SIG{'PIPE'} : '';
     my $current_sig_pipe = $SIG{'PIPE'};
@@ -104,8 +83,32 @@ sub run_cmd {
     $! = 0;
     $? = 0;
 
-    my $child_pid = IPC::Open3::open3( $stdin, $stdout, $stderr, @cmd );
-
+    my $child_pid;
+    eval { $child_pid = IPC::Open3::open3( $stdin, $stdout, $stderr, @cmd ) };
+    if ( $@ ) {
+        if ($@ =~ m{not enough arguments}) {
+            $! = 22;       # Invalid argument
+            $? = 65280;    # system();print $?;
+        }
+        elsif ($@ =~ m{open3: exec of .* failed at}) {
+            $? = -1;
+        }
+    
+        if ( ref $arg_hr->{'open3_error'} eq 'SCALAR' ) {
+            ${ $arg_hr->{'open3_error'} } = $@;
+        }
+        else {
+            $arg_hr->{'open3_error'} = $@;
+        }
+    
+        if ( $arg_hr->{'carp_open3_errors'} ) {
+            require Carp;
+            Carp::carp($@);
+        }
+    
+        return;
+    }
+    
     $arg_hr->{'timeout'} = exists $arg_hr->{'timeout'} ? abs( $arg_hr->{'timeout'} ) : 0;
 
     my $alarm;
@@ -356,11 +359,11 @@ __END__
 
 =head1 NAME
 
-IPC::Open3::Utils - simple API encapsulating the most common open3() logic/uses including handling various corne cases and caveats
+IPC::Open3::Utils - simple API encapsulating the most common open3() logic/uses including handling various corner cases and caveats
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.7
+This document describes IPC::Open3::Utils version 0.8
 
 =head1 DESCRIPTION
 
@@ -656,6 +659,8 @@ This is the key that any open3() errors get put in for post examination. If it i
       # $args{'open3_error'} will have the error if it was from open3() 
    }
 
+As of verison 0.8 this will typically also be in $@. (See note in TODO)
+
 =item carp_open3_errors
 
 Boolean to carp() errors from open3() itself. Default is false.
@@ -729,7 +734,7 @@ C<bug-ipc-open3-utils@rt.cpan.org>, or through the web interface at
 L<http://rt.cpan.org>.
 
 =head1 TODO
- 
+
  - autoflush() by default ?
 
  - if not closed && !autoflushed() finish read ?
@@ -741,6 +746,10 @@ L<http://rt.cpan.org>.
  - find out why $! seems to always be 'Bad File Descriptor' on some systems
 
  - no_hires_timeout attribute to forceusing built in alarm() even when Time::HiRes functions are available ?
+
+ - drop post-open3() call open3_error logic since it is caught immediately and put in $@ or is it possible it can peter out ambiguously later ?
+
+ - open3 eval under alarm
 
 =head1 AUTHOR
 

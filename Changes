@@ -1,5 +1,9 @@
 Revision history for IPC-Open3-Utils
 
+0.8  Fri May 21 05:33:21 2010
+    - catch open3 fatalities better (prompted by CPAN reports)
+    - POD typo
+
 0.7  Tue May 18 23:17:12 2010
     - rt 57609: add 'timeout' attributes
     - handler fatalities caught and put in $@
