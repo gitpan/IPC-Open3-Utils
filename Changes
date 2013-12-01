@@ -1,5 +1,8 @@
 Revision history for IPC-Open3-Utils
 
+0.91 Sun Dec  1 12:38:58 2013
+    - rt 67389: remove handles from IO::Select when we hit their eof and close them (thanks SCOTT)
+
 0.9  Sun Dec  1 12:00:55 2013
     - rt 91094
         - fixed $! errouneously set to 9

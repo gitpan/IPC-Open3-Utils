@@ -3,7 +3,7 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = '0.9';
+$IPC::Open3::Utils::VERSION = '0.91';
 
 require Exporter;
 @IPC::Open3::Utils::ISA       = qw(Exporter);
@@ -214,6 +214,7 @@ sub run_cmd {
           HANDLE:
             for my $fh (@ready) {
                 if ( $fh->eof ) {
+                    $sel->remove($fh);
                     $fh->close;
                     next HANDLE;
                 }
@@ -371,7 +372,7 @@ IPC::Open3::Utils - simple API encapsulating the most common open3() logic/uses 
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.9
+This document describes IPC::Open3::Utils version 0.91
 
 =head1 DESCRIPTION
 
