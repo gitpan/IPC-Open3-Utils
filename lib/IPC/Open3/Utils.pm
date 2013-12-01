@@ -3,7 +3,7 @@ package IPC::Open3::Utils;
 use strict;
 use warnings;
 
-$IPC::Open3::Utils::VERSION = '0.8';
+$IPC::Open3::Utils::VERSION = '0.9';
 
 require Exporter;
 @IPC::Open3::Utils::ISA       = qw(Exporter);
@@ -85,30 +85,30 @@ sub run_cmd {
 
     my $child_pid;
     eval { $child_pid = IPC::Open3::open3( $stdin, $stdout, $stderr, @cmd ) };
-    if ( $@ ) {
-        if ($@ =~ m{not enough arguments}) {
+    if ($@) {
+        if ( $@ =~ m{not enough arguments} ) {
             $! = 22;       # Invalid argument
             $? = 65280;    # system();print $?;
         }
-        elsif ($@ =~ m{open3: exec of .* failed at}) {
+        elsif ( $@ =~ m{open3: exec of .* failed at} ) {
             $? = -1;
         }
-    
+
         if ( ref $arg_hr->{'open3_error'} eq 'SCALAR' ) {
             ${ $arg_hr->{'open3_error'} } = $@;
         }
         else {
             $arg_hr->{'open3_error'} = $@;
         }
-    
+
         if ( $arg_hr->{'carp_open3_errors'} ) {
             require Carp;
             Carp::carp($@);
         }
-    
+
         return;
     }
-    
+
     $arg_hr->{'timeout'} = exists $arg_hr->{'timeout'} ? abs( $arg_hr->{'timeout'} ) : 0;
 
     my $alarm;
@@ -207,6 +207,8 @@ sub run_cmd {
             $get_next = sub { shift->sysread( $buffer, $byte_size ); return $buffer; };
         }
 
+        my $odd_errno = int($!);
+
       READ_LOOP:
         while ( my @ready = $sel->can_read ) {
           HANDLE:
@@ -248,13 +250,17 @@ sub run_cmd {
                     last READ_LOOP if $short_circuit_loop;
                 }
             }
+
+            $odd_errno = int($!);
         }
+
+        $! = 0 if $odd_errno == 0 && $! == 9;
 
         # my $oserr = $!;
         # my $cherr = $?;
-        $stdout->close;
-        $stderr->close;
-        $stdin->close if defined $stdin && ref $stdin eq 'IO::Handle';                         #  && !$arg_hr->{'close_stdin'};
+        $stdout->close if $stdout->opened;
+        $stderr->close if $stderr->opened;
+        $stdin->close  if defined $stdin && ref $stdin eq 'IO::Handle' && $stdin->opened;    #  && !$arg_hr->{'close_stdin'};
 
         # $! = $oserr;
         # $? = $cherr;
@@ -333,6 +339,7 @@ sub child_error_failed_to_execute {
 
 sub child_error_seg_faulted {
     my $sysrc = @_ ? shift() : $?;
+    return if child_error_failed_to_execute($sysrc);
     return child_error_exit_signal($sysrc) == 11;
 }
 
@@ -350,6 +357,7 @@ sub child_error_exit_signal {
 
 sub child_error_exit_value {
     my $sysrc = @_ ? shift() : $?;
+    return if child_error_failed_to_execute($sysrc);
     return $sysrc >> 8;
 }
 
@@ -363,7 +371,7 @@ IPC::Open3::Utils - simple API encapsulating the most common open3() logic/uses 
 
 =head1 VERSION
 
-This document describes IPC::Open3::Utils version 0.8
+This document describes IPC::Open3::Utils version 0.9
 
 =head1 DESCRIPTION
 
@@ -415,8 +423,10 @@ If you care about exactly what went wrong you can get very detailed:
             print "Command failed to execute.\n" if child_error_failed_to_execute($?);
             print "Command seg faulted.\n" if child_error_seg_faulted($?);
             print "Command core dumped.\n" if child_error_core_dumped($?);
-            print "Command exited with signal: " . child_error_exit_signal($?) . ".\n";
-            print "Command exited with value: " . child_error_exit_value($?) . ".\n";
+            unless ( child_error_failed_to_execute($?) ) {
+                print "Command exited with signal: " . child_error_exit_signal($?) . ".\n";
+                print "Command exited with value: " . child_error_exit_value($?) . ".\n";
+            }
         }
     }
 

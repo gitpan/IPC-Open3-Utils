@@ -1,5 +1,12 @@
 Revision history for IPC-Open3-Utils
 
+0.9  Sun Dec  1 12:00:55 2013
+    - rt 91094
+        - fixed $! errouneously set to 9
+        - child_error_exit_value() factor in child_error_failed_to_execute()
+        - open3 error is from eval so we can't avoid “ … at …”
+        - avoid uninit warning
+        
 0.8  Fri May 21 05:33:21 2010
     - catch open3 fatalities better (prompted by CPAN reports)
     - POD typo
